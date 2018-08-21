@@ -36,11 +36,11 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
                 % they will be filled with default values
                 % effectivly upcasting an object.
                 %R.WoundLbl = S.WoundLbl;
-                R.CorneaCellLbls = S.CorneaCellLbls;                
+                R.CorneaCellLbls = S.CorneaCellLbls;
             end
             if isfield(S,'Frames') % is the fields exists load them, if not,
-                                     % they will be filled with default values
-                                     % effectivly upcasting an object. 
+                % they will be filled with default values
+                % effectivly upcasting an object.
                 R.Frames = S.Frames;
             end
             if isfield(S,'Tracks') % is the fields exists load them, if not,
@@ -225,7 +225,10 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
                 ampRatio = a1./a2;
                 J = ampRatio < 1;
                 ampRatio(J) = 1./ampRatio(J);
-                costMat = Dists.*(log2(ampRatio)+epsilon);
+                %Keep only epithelium for tracking
+                epiMatches = single(~isnan(CorneaCells{i}.epiScore))*single(~isnan(CorneaCells{i+1}.epiScore))';
+                
+                costMat = Dists.*(log2(ampRatio)+epsilon).*epiMatches;
                 
                 costMat(Dists>searchRadius) = 0;
                 %costMat(ampRatio>maxAmpRatio) = 0;
@@ -256,7 +259,7 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
             end
             R.setCorneaCellsLbl(CorneaCells,pos)
         end
-            
+        
         function closeGaps(R,pos)
             CorneaCells = R.getCorneaCellsLbl(pos);
             inds = find(cellfun(@(x) ~isempty(x), CorneaCells));
@@ -381,13 +384,13 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
             %CentroidsStarts = [];
             %CentroidsEnds = [];
             
-%             for ind=1:numTracks
-%                 CentroidsStarts = [CentroidsStarts; full(trackedFeatureInfo(ind,8*(trackStartTime(ind)-1)+1:8*(trackStartTime(ind)-1)+3))];
-%                 CentroidsEnds = [CentroidsEnds; full(trackedFeatureInfo(ind,8*(trackStartTime(ind)-1)+1:8*(trackStartTime(ind)-1)+3))];
-%             end
+            %             for ind=1:numTracks
+            %                 CentroidsStarts = [CentroidsStarts; full(trackedFeatureInfo(ind,8*(trackStartTime(ind)-1)+1:8*(trackStartTime(ind)-1)+3))];
+            %                 CentroidsEnds = [CentroidsEnds; full(trackedFeatureInfo(ind,8*(trackStartTime(ind)-1)+1:8*(trackStartTime(ind)-1)+3))];
+            %             end
             CentroidsStarts = cell2mat(arrayfun(@(a) full(trackedFeatureInfo(a,8*(trackStartTime(a)-1)+1:8*(trackStartTime(a)-1)+3))',1:numTracks,'UniformOutput',false))';
             CentroidsEnds = cell2mat(arrayfun(@(a) full(trackedFeatureInfo(a,8*(trackEndTime(a)-1)+1:8*(trackEndTime(a)-1)+3))',1:numTracks,'UniformOutput',false))';
-
+            
             indx1=[];
             indx2=[];
             Dists=[];
@@ -792,14 +795,116 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
             a = arrayfun(@(x) size(x.tracksFeatIndxCG,2),tracksFinal);
             longtracksFinal = tracksFinal(a>20);% remove all tracks shorter than 20 frames
             
-            R.setTracks(longtracksFinal,pos)
+            R.setTracks(longtracksFinal,pos);
         end
         
         
         
+        function setEpitheliumFitParams(R,pos)
+            CorneaCells = R.getCorneaCellsLbl(pos);
+            
+            for i=1:numel(CorneaCells)
+                distScore = CorneaCells{i}.Centroids(:,3)-CorneaCells{i}.TopoZ;
+                [h, Xbins] = histcounts(distScore,100,'Normalization', 'probability');
+                Xbins = (Xbins(2:end)+Xbins(1:end-1))/2;
+                if i==1
+                    plot(Xbins,h);
+                    shg
+                    title('select gaussian area for lower (epithelium) peak')
+                    pause;
+                    J =InAxes;
+                else
+                    J = logical((Xbins>(BETA(2)-2*BETA(3))).*(Xbins<(BETA(2)+BETA(3))));
+                end
+                hToFit = h(J);
+                XtoFit = Xbins(J);
+                
+                %
+                posit = median(XtoFit)
+                stdev = std(XtoFit)
+                amp = max(hToFit)*sqrt(2*pi)*stdev
+                BETA0 = [amp posit stdev];
+                [BETA,RESNORM,RESIDUAL,EXITFLAG] = lsqcurvefit(@GaussianFit, BETA0 ,XtoFit, hToFit,[0 -inf 0], [inf inf inf]);
+                x = min(Xbins):0.1:max(Xbins);
+                if EXITFLAG>=0;
+                    plot(Xbins, h, '-.', x, GaussianFit(BETA, x));
+                    figure(gcf)
+                end
+                set(gca,'xlim',[-100,200],'ylim',[0,0.2]);
+                drawnow;
+                
+                CorneaCells{i}.FitParam.func = @(x) GaussianFit(BETA,x);
+                CorneaCells{i}.FitParam.cumFunc = @(x) (1+erf((x-BETA(2))/(sqrt(2)*BETA(3))))/2;
+                CorneaCells{i}.FitParam.stdev = BETA(3);
+                CorneaCells{i}.FitParam.posit = BETA(2);
+                CorneaCells{i}.FitParam.amp = BETA(1);
+                
+                
+                
+                
+                %Take upper and lower limits to keep as epithelium cells. +/-2\sigma
+                lowLim = CorneaCells{i}.FitParam.posit-2*CorneaCells{i}.FitParam.stdev;
+                highLim = CorneaCells{i}.FitParam.posit+2*CorneaCells{i}.FitParam.stdev;
+                CorneaCells{i}.Jepi = ((distScore<highLim).*(distScore>lowLim));
+                CorneaCells{i}.epiScore = 1-CorneaCells{i}.FitParam.cumFunc(distScore);
+                CorneaCells{i}.epiScore(~CorneaCells{i}.Jepi)=NaN;
+                
+                CorneaCells{i}.Jepi = find(CorneaCells{i}.Jepi);
+            end
+        end
         
+        function refineEpitheliumSurface(R,pos)
+            %
+            % Try to refine manifold...
+            CorneaCells = R.getCorneaCellsLbl(pos);
+            pth = R.pth;
+            MD = Metadata(pth);
+            imageSize = R.PIVlbl{1}.ImageDims;
+            parfor i=1:numel(CorneaCells)
+                i
+                MD = Metadata(pth);
+                Centroids = CorneaCells{i}.Centroids;
+                Intensities = CorneaCells{i}.Intensities;
+                CC = CorneaCells{i}.CC;
+                Jepi = CorneaCells{i}.Jepi;
+                
+                %get function that defines the whole eputhelium
+                F = scatteredInterpolant(Centroids(Jepi,1),Centroids(Jepi,2),Centroids(Jepi,3),'linear','nearest');
+                
+                
+                
+                Tforms = MD.getSpecificMetadata('driftTform','Position',pos, 'frame', i);
+                dY = Tforms{1}(7);
+                dX = Tforms{1}(8);
+                
+                pad = 100;
+                x = (-pad+1:imageSize(2)+pad)+dY;
+                y = (-pad+1:imageSize(1)+pad)+dX;
+                
+                [xx, yy] = meshgrid(x,y);
+                zz = F(xx,yy);
+                zz = imgaussfilt(zz,50);
+                %
+                TopoZ = interp2(xx,yy,zz,Centroids(:,1),Centroids(:,2),'nearest');
+                %aha!
+                DT = delaunayTriangulation([Centroids(:,1),Centroids(:,2),TopoZ]);
+                [~, DistFromManifold] = nearestNeighbor(DT,Centroids(:,:));
+                DistFromManifold = DistFromManifold.*sign(Centroids(:,3)-TopoZ);
+                
+                [~,J] = sort(DistFromManifold); %Sort by distance from smoothed epi map
+                TopoZ = TopoZ(J);
+                Centroids = Centroids(J,:);
+                Intensities = Intensities(J);
+                CC.PixelIdxList = CC.PixelIdxList(J);
+                CorneaCells{i}.Centroids = Centroids;
+                CorneaCells{i}.Intensities = Intensities;
+                CorneaCells{i}.TopoZ = TopoZ;
+                CorneaCells{i}.CC = CC;
+            end
+            R.setCorneaCellsLbl(CorneaCells,pos)
+        end
         
-        
+        %
         
         
         
@@ -851,16 +956,16 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
         
         %plotting
         function HeatMapData(R, dataname,pos, frame, varargin)
-            arg.clims = [-10, 10];
+            arg.clims = [-15, 15];
             arg = parseVarargin(varargin,arg);
             
             a = R.getData(dataname,pos);
             a = a(:,frame);
-  %          if min(a(:))>=0
-  %              colormap(plasma())
-  %          else
-                colormap(makeColorMap([0.6 0 0.6],[1 1 1],[0.8 0.8 0]))
-  %          end;
+                      if min(arg.clims)>=0
+                          colormap(magma())
+                      else
+            colormap(makeColorMap([0.6 0 0.6],[0 0 0],[0.8 0.8 0]))
+                      end;
             imagesc(unique(R.PIVlbl{1}.X), unique(R.PIVlbl{1}.Y), reshape(a,numel(unique(R.PIVlbl{1}.X)),numel(unique(R.PIVlbl{1}.Y)))',arg.clims);
             set(gcf,'color','w');
             axis equal
