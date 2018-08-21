@@ -51,7 +51,7 @@ classdef WoundLbl < handle
                     end
                 elseif W.IsThereAWound(1)
                     lastWframe = find(diff(W.IsThereAWound));
-                    Centroid(i,:) = Centroid(max(lastWframe-5,1));
+                    Centroid(i,:) = Centroid(max(lastWframe-5,1),:);
                 else
                     Centroid(i,:) = ceil(W.ImageDims./2);
                     %warning('no wound, returning center of frame.')
