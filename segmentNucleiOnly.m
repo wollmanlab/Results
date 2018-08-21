@@ -21,6 +21,7 @@ arg.specificframeonly = []; % will duplicate that frame for all timepoints
 arg.singleframe = false; % must be used in conjunction with specificframeonly. IF true will only return single timepoint
 arg.track_method = 'none';
 arg.threshold_method = 'otsu';
+arg.flatfieldcorrection = true;
 
 arg = parseVarargin(varargin,arg); 
 
@@ -32,12 +33,12 @@ end
 if iscell(arg.nuc_channel)
     nuc=cell(numel(arg.nuc_channel),1); 
     for j=1:numel(arg.nuc_channel)
-        nuc{j} = stkread(MD,arg.positiontype,well,'Channel',arg.nuc_channel{j} ,'timefunc',arg.timefunc);
+        nuc{j} = stkread(MD,arg.positiontype,well,'Channel',arg.nuc_channel{j} ,'timefunc',arg.timefunc, 'flatfieldcorrection', arg.flatfieldcorrection);
     end
     nuc=mean(cat(4,nuc{:}),4);
     arg.nuc_channel = arg.nuc_channel{1};
 else
-    nuc = stkread(MD,arg.positiontype,well,'Channel',arg.nuc_channel ,'timefunc',arg.timefunc);
+    nuc = stkread(MD,arg.positiontype,well,'Channel',arg.nuc_channel ,'timefunc',arg.timefunc, 'flatfieldcorrection', arg.flatfieldcorrection);
 end
 
 %% Create the CellLabel object
@@ -56,13 +57,11 @@ if islogical(arg.register) && arg.register
         if numel(unique(MD,'acq'))==1
             possibleShiftingFrames=[];
         else
-            tbl=MD.tabulate('acq','Position',well,'Channel',arg.nuc_channel,'timefunc',arg.timefunc);
-            tbl=cat(1,tbl{:,2});
-            possibleShiftingFrames=cumsum(tbl(1:end-1))+1;
+            possibleShiftingFrames=MD.findAcqIndexes(well, arg.nuc_channel, 'timefunc', arg.timefunc);
         end
     [nuc,Tforms] = registerStack(nuc,'maxdisp',100,'onlyspecificframes',possibleShiftingFrames);
     else
-        [nuc,Tforms] = registerStack(nuc,'reference',arg.registerreference);
+        [nuc,Tforms] = registerStack(nuc,'reference',arg.registerreference, 'maxdisp', 100);
     end
     Reg = Registration(T,Tforms);
     arg.register = Reg; 
