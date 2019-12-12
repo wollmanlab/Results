@@ -32,12 +32,12 @@ classdef WoundLbl < handle
 
         function Mask = Mask(W,frame)
                 %Mask = ones(W.ImageDims(1),W.ImageDims(2),size(W.PolyXY,3));
-                Mask = ~poly2mask(double(W.PolyXY{frame}(:,1)),double(W.PolyXY{frame}(:,2)),W.ImageDims(1),W.ImageDims(2));
+                Mask = ~poly2mask(double(W.PolyXY(:,1, frame)),double(W.PolyXY(:,2,frame)),W.ImageDims(1),W.ImageDims(2));
         end
         
         function Centroid = Centroid(W,frame)
             if nargin<2
-                frame =1:numel(W.PolyXY);
+                frame =1:numel(W.IsThereAWound);
             end
             Centroid = zeros(numel(frame),2);
             for i=1:numel(frame)
@@ -102,7 +102,7 @@ classdef WoundLbl < handle
         end
 
         function ix = InWound(W, frame,XY)
-            Wpoly = W.PolyXY{frame};
+            Wpoly = W.PolyXY(:,:,frame);
             if numel(unique(Wpoly,'rows'))>2
                 ix = inpolygon(XY(:,1), XY(:,2), Wpoly(:,1), Wpoly(:,2));
             else

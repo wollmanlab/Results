@@ -404,7 +404,7 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
                 for ind2=1: numTracks
                     dT = trackStartTime(ind2)-trackEndTime(ind1);
                     if dT>0 && dT<=maxTimeJump;%condition on time
-                        dR = norm(CentroidsStarts(ind1,:)-CentroidsStarts(ind2,:));
+                        dR = norm(CentroidsStarts(ind1,:)-CentroidsEnds(ind2,:));
                         if dR<=sqrt(dT)*maxStep;%condition on space
                             indx1=[indx1 ind1];
                             indx2=[indx2 ind2];
@@ -800,20 +800,20 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
         
         
         
-        function setEpitheliumFitParams(R,pos)
+        function setEpitheliumFitParams(R,pos,varargin)
             CorneaCells = R.getCorneaCellsLbl(pos);
             
             for i=1:numel(CorneaCells)
                 distScore = CorneaCells{i}.Centroids(:,3)-CorneaCells{i}.TopoZ;
-                [h, Xbins] = histcounts(distScore,100,'Normalization', 'probability');
+                [h, Xbins] = histcounts(distScore,200,'Normalization', 'probability');
                 Xbins = (Xbins(2:end)+Xbins(1:end-1))/2;
-                if i==1
+                if i==1 || nargin>2
                     plot(Xbins,h);
                     shg
                     title('select gaussian area for lower (epithelium) peak')
                     pause;
                     J =InAxes;
-                else
+                else 
                     J = logical((Xbins>(BETA(2)-2*BETA(3))).*(Xbins<(BETA(2)+BETA(3))));
                 end
                 hToFit = h(J);
@@ -824,11 +824,14 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
                 stdev = std(XtoFit)
                 amp = max(hToFit)*sqrt(2*pi)*stdev
                 BETA0 = [amp posit stdev];
-                [BETA,RESNORM,RESIDUAL,EXITFLAG] = lsqcurvefit(@GaussianFit, BETA0 ,XtoFit, hToFit,[0 -inf 0], [inf inf inf]);
+                [BETA,RESNORM,RESIDUAL,EXITFLAG] = lsqcurvefit(@GaussianFit, BETA0 ,XtoFit, hToFit,[0 -inf 0.8*stdev], [inf inf 1.2*stdev]);
                 x = min(Xbins):0.1:max(Xbins);
                 if EXITFLAG>=0;
                     plot(Xbins, h, '-.', x, GaussianFit(BETA, x));
                     figure(gcf)
+                    if nargin>2
+                        pause(0.2)
+                    end
                 end
                 set(gca,'xlim',[-100,200],'ylim',[0,0.2]);
                 drawnow;
@@ -859,7 +862,7 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
             CorneaCells = R.getCorneaCellsLbl(pos);
             pth = R.pth;
             MD = Metadata(pth);
-            imageSize = R.PIVlbl{1}.ImageDims;
+            imageSize = CorneaCells{1}.ImageDims(1:2);
             parfor i=1:numel(CorneaCells)
                 i
                 MD = Metadata(pth);
@@ -907,6 +910,11 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
         %
         
         
+        function E = simpEntropy(W,J1)
+            h = histcounts(J1,'Normalization','probability');
+            
+            E = -nansum(h.*log(h));
+        end
         
         function R = merge(Rvec,varargin)
             % TODO: extend support for merging object with different
@@ -964,7 +972,31 @@ classdef MultiPositionSingleCellWoundResults < MultiPositionResults
                       if min(arg.clims)>=0
                           colormap(magma())
                       else
-            colormap(makeColorMap([0.6 0 0.6],[0 0 0],[0.8 0.8 0]))
+                          colormap(makeColorMap([0.6 0 0.6],[0 0 0],[0.8 0.8 0]))
+                      end;
+            imagesc(unique(R.PIVlbl{1}.X), unique(R.PIVlbl{1}.Y), reshape(a,numel(unique(R.PIVlbl{1}.X)),numel(unique(R.PIVlbl{1}.Y)))',arg.clims);
+            set(gcf,'color','w');
+            axis equal
+            title(dataname)
+            colorbar
+            set(gca,'ydir','normal')
+            shg;
+        end
+        
+        
+        function HeatMapDataSmooth(R, dataname,pos, frame, varargin)
+            arg.clims = [-15, 15];
+            arg = parseVarargin(varargin,arg);
+            
+            a = R.getData(dataname,pos);
+            for ind=1:size(a,1)
+                a(ind,max(frame-15,1):min(frame+15, size(a,2))) = Smoothing(a(ind,max(frame-15,1):min(frame+15, size(a,2))));
+            end
+            a = a(:,frame);
+                      if min(arg.clims)>=0
+                          colormap(magma())
+                      else
+                          colormap(makeColorMap([0.6 0 0.6],[0 0 0],[0.8 0.8 0]))
                       end;
             imagesc(unique(R.PIVlbl{1}.X), unique(R.PIVlbl{1}.Y), reshape(a,numel(unique(R.PIVlbl{1}.X)),numel(unique(R.PIVlbl{1}.Y)))',arg.clims);
             set(gcf,'color','w');
