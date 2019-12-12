@@ -12,6 +12,7 @@ arg.background_smooth = 'spline';
 arg.func = 'mean';
 arg.samplingdensity = 15; 
 arg.group_registration_by_acq = false; 
+arg.grouping = [];
 arg.percentile = 0; % Parameter passed to backgroundSubtraction
 
 arg = parseVarargin(varargin,arg); 
@@ -80,7 +81,11 @@ end
 if arg.register && isa(Lbl.Reg,'Registration') 
     if arg.group_registration_by_acq
         acq = MD.getSpecificMetadata('acq','Position',well,'Channel',arg.channel);
-        [~,~,grouping] = unique(acq);
+        if isempty(arg.grouping)
+            [~,~,grouping] = unique(acq);
+        else
+            grouping=arg.grouping;
+        end
         measurementStack = Lbl.Reg.register(measurementStack,T,'grouping',grouping);
     else
         measurementStack = Lbl.Reg.register(measurementStack,T);
